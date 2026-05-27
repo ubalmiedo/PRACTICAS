@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema de Inventario - Login</title>
+    <title>Sistema de Inventario - Cloud Sync</title>
     <style>
         * {
             margin: 0;
@@ -182,7 +182,38 @@
             opacity: 0.9;
         }
 
+        .sync-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            padding: 5px 15px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 20px;
+            margin-bottom: 10px;
+        }
+
+        .sync-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4caf50;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
         .user-info {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 10px;
+        }
+
+        .user-name {
             display: flex;
             align-items: center;
             gap: 15px;
@@ -191,7 +222,7 @@
             border-radius: 10px;
         }
 
-        .user-info span {
+        .user-name span {
             font-weight: 600;
         }
 
@@ -388,6 +419,7 @@
         .actions {
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
         }
 
         .badge {
@@ -418,11 +450,11 @@
             color: #999;
         }
 
-        .empty-state svg {
-            width: 100px;
-            height: 100px;
-            margin-bottom: 20px;
-            opacity: 0.3;
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+            font-size: 18px;
         }
 
         @media (max-width: 768px) {
@@ -436,7 +468,7 @@
 
             .user-info {
                 width: 100%;
-                justify-content: center;
+                align-items: center;
                 margin-top: 15px;
             }
 
@@ -450,6 +482,14 @@
 
             th, td {
                 padding: 10px;
+            }
+
+            .actions {
+                flex-direction: column;
+            }
+
+            .actions button {
+                width: 100%;
             }
         }
 
@@ -479,7 +519,7 @@
             <div class="login-header">
                 <div class="login-icon">🔐</div>
                 <h1>Bienvenido</h1>
-                <p>Sistema de Inventario</p>
+                <p>Sistema de Inventario Cloud</p>
             </div>
 
             <div class="error-message" id="errorMessage">
@@ -519,10 +559,16 @@
                     <p>Gestiona tus productos de forma eficiente</p>
                 </div>
                 <div class="user-info">
-                    <span>👤 <span id="currentUser"></span></span>
-                    <button class="btn-logout" onclick="logout()">
-                        🚪 Cerrar Sesión
-                    </button>
+                    <div class="sync-indicator">
+                        <div class="sync-dot"></div>
+                        <span>Sincronizado en la nube ☁️</span>
+                    </div>
+                    <div class="user-name">
+                        <span>👤 <span id="currentUser"></span></span>
+                        <button class="btn-logout" onclick="logout()">
+                            🚪 Salir
+                        </button>
+                    </div>
                 </div>
             </header>
 
@@ -605,7 +651,11 @@
                             </tr>
                         </thead>
                         <tbody id="productTableBody">
-                            <!-- Los productos se cargarán aquí -->
+                            <tr>
+                                <td colspan="8" class="loading">
+                                    ⏳ Cargando productos...
+                                </td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -615,8 +665,33 @@
 
     <div class="notification" id="notification"></div>
 
-    <script>
+    <!-- Firebase SDK -->
+    <script type="module">
+        // ============================================
+        // CONFIGURACIÓN DE FIREBASE
+        // ============================================
+        // IMPORTANTE: Reemplaza estos valores con los de TU proyecto Firebase
+      // Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDrjSnXrxI8JP5So6K8D4_c-3QfMYSqeSg",
+  authDomain: "inventarioapp-33155.firebaseapp.com",
+  projectId: "inventarioapp-33155",
+  storageBucket: "inventarioapp-33155.firebasestorage.app",
+  messagingSenderId: "115181250960",
+  appId: "1:115181250960:web:ea13e31c73c547a35d6b15"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+
+        // ============================================
         // SISTEMA DE AUTENTICACIÓN
+        // ============================================
         class AuthSystem {
             constructor() {
                 this.validUsername = 'admin';
@@ -650,8 +725,6 @@
                 sessionStorage.removeItem('isLoggedIn');
                 sessionStorage.removeItem('username');
                 this.showLogin();
-                
-                // Mostrar notificación
                 this.showNotification('Sesión cerrada correctamente 👋');
             }
 
@@ -666,9 +739,8 @@
                 document.getElementById('inventoryContainer').style.display = 'block';
                 document.getElementById('currentUser').textContent = username;
                 
-                // Inicializar el inventario si no existe
                 if (!window.inventory) {
-                    window.inventory = new InventoryManager();
+                    window.inventory = new InventoryManager(db);
                 }
             }
 
@@ -676,30 +748,21 @@
                 const notification = document.getElementById('notification');
                 notification.textContent = message;
                 notification.classList.add('show');
-                
-                setTimeout(() => {
-                    notification.classList.remove('show');
-                }, 3000);
+                setTimeout(() => notification.classList.remove('show'), 3000);
             }
         }
 
-        // SISTEMA DE INVENTARIO
+        // ============================================
+        // SISTEMA DE INVENTARIO CON FIREBASE
+        // ============================================
         class InventoryManager {
-            constructor() {
-                this.products = this.loadProducts();
+            constructor(database) {
+                this.db = database;
+                this.products = [];
                 this.editingId = null;
+                this.collectionName = 'products';
                 this.initEventListeners();
-                this.renderTable();
-                this.updateStats();
-            }
-
-            loadProducts() {
-                const stored = localStorage.getItem('inventory');
-                return stored ? JSON.parse(stored) : [];
-            }
-
-            saveProducts() {
-                localStorage.setItem('inventory', JSON.stringify(this.products));
+                this.listenToChanges();
             }
 
             initEventListeners() {
@@ -717,35 +780,55 @@
                 });
             }
 
-            handleSubmit() {
+            // Escuchar cambios en tiempo real
+            listenToChanges() {
+                const q = query(collection(this.db, this.collectionName), orderBy('name'));
+                
+                onSnapshot(q, (snapshot) => {
+                    this.products = [];
+                    snapshot.forEach((doc) => {
+                        this.products.push({
+                            firebaseId: doc.id,
+                            ...doc.data()
+                        });
+                    });
+                    this.renderTable();
+                    this.updateStats();
+                });
+            }
+
+            async handleSubmit() {
                 const product = {
-                    id: this.editingId || Date.now(),
                     name: document.getElementById('productName').value,
                     category: document.getElementById('category').value,
                     quantity: parseInt(document.getElementById('quantity').value),
-                    price: parseFloat(document.getElementById('price').value)
+                    price: parseFloat(document.getElementById('price').value),
+                    timestamp: Date.now()
                 };
 
-                if (this.editingId) {
-                    const index = this.products.findIndex(p => p.id === this.editingId);
-                    this.products[index] = product;
-                    this.showNotification('Producto actualizado correctamente ✓');
-                    this.cancelEdit();
-                } else {
-                    this.products.push(product);
-                    this.showNotification('Producto agregado correctamente ✓');
+                try {
+                    if (this.editingId) {
+                        // Actualizar producto existente
+                        const productRef = doc(this.db, this.collectionName, this.editingId);
+                        await updateDoc(productRef, product);
+                        this.showNotification('✅ Producto actualizado correctamente');
+                        this.cancelEdit();
+                    } else {
+                        // Agregar nuevo producto
+                        await addDoc(collection(this.db, this.collectionName), product);
+                        this.showNotification('✅ Producto agregado correctamente');
+                    }
+                    document.getElementById('productForm').reset();
+                } catch (error) {
+                    console.error("Error:", error);
+                    this.showNotification('❌ Error al guardar el producto');
                 }
-
-                this.saveProducts();
-                this.renderTable();
-                this.updateStats();
-                document.getElementById('productForm').reset();
             }
 
-            editProduct(id) {
-                const product = this.products.find(p => p.id === id);
+            editProduct(firebaseId) {
+                const product = this.products.find(p => p.firebaseId === firebaseId);
                 if (product) {
-                    this.editingId = id;
+                    this.editingId = firebaseId;
                     document.getElementById('productName').value = product.name;
                     document.getElementById('category').value = product.category;
                     document.getElementById('quantity').value = product.quantity;
@@ -769,13 +852,15 @@
                 document.getElementById('productForm').reset();
             }
 
-            deleteProduct(id) {
+            async deleteProduct(firebaseId) {
                 if (confirm('¿Estás seguro de eliminar este producto?')) {
-                    this.products = this.products.filter(p => p.id !== id);
-                    this.saveProducts();
-                    this.renderTable();
-                    this.updateStats();
-                    this.showNotification('Producto eliminado correctamente ✓');
+                    try {
+                        await deleteDoc(doc(this.db, this.collectionName, firebaseId));
+                        this.showNotification('✅ Producto eliminado correctamente');
+                    } catch (error) {
+                        console.error("Error:", error);
+                        this.showNotification('❌ Error al eliminar el producto');
+                    }
                 }
             }
 
@@ -793,7 +878,7 @@
                     tbody.innerHTML = `
                         <tr>
                             <td colspan="8" class="empty-state">
-                                <div>📦</div>
+                                <div style="font-size: 4em;">📦</div>
                                 <h3>No hay productos en el inventario</h3>
                                 <p>Agrega tu primer producto usando el formulario arriba</p>
                             </td>
@@ -802,13 +887,13 @@
                     return;
                 }
 
-                tbody.innerHTML = products.map(product => {
+                tbody.innerHTML = products.map((product, index) => {
                     const total = product.quantity * product.price;
                     const status = this.getStockStatus(product.quantity);
                     
                     return `
                         <tr>
-                            <td>#${product.id.toString().slice(-4)}</td>
+                            <td>#${(index + 1).toString().padStart(3, '0')}</td>
                             <td><strong>${product.name}</strong></td>
                             <td>${product.category}</td>
                             <td>${product.quantity}</td>
@@ -817,10 +902,10 @@
                             <td><span class="badge ${status.class}">${status.text}</span></td>
                             <td>
                                 <div class="actions">
-                                    <button class="btn btn-warning" onclick="inventory.editProduct(${product.id})">
+                                    <button class="btn btn-warning" onclick="inventory.editProduct('${product.firebaseId}')">
                                         ✏️ Editar
                                     </button>
-                                    <button class="btn btn-danger" onclick="inventory.deleteProduct(${product.id})">
+                                    <button class="btn btn-danger" onclick="inventory.deleteProduct('${product.firebaseId}')">
                                         🗑️ Eliminar
                                     </button>
                                 </div>
@@ -852,15 +937,15 @@
                 const notification = document.getElementById('notification');
                 notification.textContent = message;
                 notification.classList.add('show');
-                
-                setTimeout(() => {
-                    notification.classList.remove('show');
-                }, 3000);
+                setTimeout(() => notification.classList.remove('show'), 3000);
             }
         }
 
-        // Inicializar el sistema de autenticación
+        // ============================================
+        // INICIALIZACIÓN
+        // ============================================
         const auth = new AuthSystem();
+        window.auth = auth;
 
         // Manejar el formulario de login
         document.getElementById('loginForm').addEventListener('submit', function(e) {
@@ -880,16 +965,10 @@
         });
 
         // Función global para cerrar sesión
-        function logout() {
+        window.logout = function() {
             if (confirm('¿Estás seguro que deseas cerrar sesión?')) {
                 auth.logout();
             }
-        }
-
-        // Prevenir el botón de retroceso después del login
-        window.history.pushState(null, "", window.location.href);
-        window.onpopstate = function() {
-            window.history.pushState(null, "", window.location.href);
         };
     </script>
 </body>
