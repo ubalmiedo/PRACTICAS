@@ -773,10 +773,21 @@
                 loginContainer.style.display = 'flex';
                 inventoryContainer.style.display = 'none';
                 
+                // Limpiar campos del formulario de login
+                document.getElementById('loginForm').reset();
+                document.getElementById('username').value = '';
+                document.getElementById('password').value = '';
+                document.getElementById('errorMessage').classList.remove('show');
+                
                 console.log('Estado de pantallas:', {
                     login: loginContainer.style.display,
                     inventory: inventoryContainer.style.display
                 });
+                
+                // Enfocar el campo de usuario
+                setTimeout(() => {
+                    document.getElementById('username').focus();
+                }, 100);
             }
 
             showInventory(username) {
