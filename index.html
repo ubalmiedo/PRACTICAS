@@ -123,6 +123,11 @@
             box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
         }
 
+        .btn-login:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
         .error-message {
             background: #f8d7da;
             color: #721c24;
@@ -510,6 +515,10 @@
         .notification.show {
             transform: translateX(0);
         }
+
+        .notification.error {
+            background: #dc3545;
+        }
     </style>
 </head>
 <body>
@@ -543,7 +552,7 @@
                     </div>
                 </div>
 
-                <button type="submit" class="btn-login">
+                <button type="submit" class="btn-login" id="loginButton">
                     🚀 Iniciar Sesión
                 </button>
             </form>
@@ -670,13 +679,10 @@
         // ============================================
         // CONFIGURACIÓN DE FIREBASE
         // ============================================
-        // IMPORTANTE: Reemplaza estos valores con los de TU proyecto Firebase
-     // Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-// Your web app's Firebase configuration
+        // REEMPLAZA CON TU CONFIGURACIÓN DE FIREBASE
 const firebaseConfig = {
   apiKey: "AIzaSyDrjSnXrxI8JP5So6K8D4_c-3QfMYSqeSg",
   authDomain: "inventarioapp-33155.firebaseapp.com",
@@ -686,9 +692,19 @@ const firebaseConfig = {
   appId: "1:115181250960:web:ea13e31c73c547a35d6b15"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        // Verificar si Firebase está configurado
+        let firebaseInitialized = false;
+        let db = null;
+
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            firebaseInitialized = true;
+            console.log('✅ Firebase inicializado correctamente');
+        } catch (error) {
+            console.error('❌ Error al inicializar Firebase:', error);
+            console.log('⚠️ La aplicación funcionará sin sincronización en la nube');
+        }
 
         // ============================================
         // SISTEMA DE AUTENTICACIÓN
@@ -704,6 +720,8 @@ const app = initializeApp(firebaseConfig);
                 const isLoggedIn = sessionStorage.getItem('isLoggedIn');
                 const username = sessionStorage.getItem('username');
 
+                console.log('Verificando autenticación...', { isLoggedIn, username });
+
                 if (isLoggedIn === 'true' && username) {
                     this.showInventory(username);
                 } else {
@@ -712,17 +730,27 @@ const app = initializeApp(firebaseConfig);
             }
 
             login(username, password) {
+                console.log('Intentando login...', { username });
+                
                 if (username === this.validUsername && password === this.validPassword) {
+                    console.log('✅ Credenciales correctas');
                     sessionStorage.setItem('isLoggedIn', 'true');
                     sessionStorage.setItem('username', username);
-                    this.showInventory(username);
+                    
+                    // Esperar un momento antes de cambiar de pantalla
+                    setTimeout(() => {
+                        this.showInventory(username);
+                    }, 100);
+                    
                     return true;
                 } else {
+                    console.log('❌ Credenciales incorrectas');
                     return false;
                 }
             }
 
             logout() {
+                console.log('Cerrando sesión...');
                 sessionStorage.removeItem('isLoggedIn');
                 sessionStorage.removeItem('username');
                 this.showLogin();
@@ -730,12 +758,16 @@ const app = initializeApp(firebaseConfig);
             }
 
             showLogin() {
+                console.log('Mostrando pantalla de login');
                 document.getElementById('loginContainer').style.display = 'flex';
                 document.getElementById('inventoryContainer').style.display = 'none';
-                document.getElementById('username').focus();
+                setTimeout(() => {
+                    document.getElementById('username').focus();
+                }, 100);
             }
 
             showInventory(username) {
+                console.log('Mostrando inventario para:', username);
                 document.getElementById('loginContainer').style.display = 'none';
                 document.getElementById('inventoryContainer').style.display = 'block';
                 document.getElementById('currentUser').textContent = username;
@@ -745,16 +777,18 @@ const app = initializeApp(firebaseConfig);
                 }
             }
 
-            showNotification(message) {
+            showNotification(message, isError = false) {
                 const notification = document.getElementById('notification');
                 notification.textContent = message;
+                notification.className = 'notification';
+                if (isError) notification.classList.add('error');
                 notification.classList.add('show');
                 setTimeout(() => notification.classList.remove('show'), 3000);
             }
         }
 
         // ============================================
-        // SISTEMA DE INVENTARIO CON FIREBASE
+        // SISTEMA DE INVENTARIO
         // ============================================
         class InventoryManager {
             constructor(database) {
@@ -762,8 +796,31 @@ const app = initializeApp(firebaseConfig);
                 this.products = [];
                 this.editingId = null;
                 this.collectionName = 'products';
+                this.usingFirebase = database !== null;
+                
+                console.log('Inicializando InventoryManager...', { usingFirebase: this.usingFirebase });
+                
                 this.initEventListeners();
-                this.listenToChanges();
+                
+                if (this.usingFirebase) {
+                    this.listenToChanges();
+                } else {
+                    // Cargar desde localStorage si no hay Firebase
+                    this.loadFromLocalStorage();
+                }
+            }
+
+            loadFromLocalStorage() {
+                const stored = localStorage.getItem('inventory_products');
+                if (stored) {
+                    this.products = JSON.parse(stored);
+                }
+                this.renderTable();
+                this.updateStats();
+            }
+
+            saveToLocalStorage() {
+                localStorage.setItem('inventory_products', JSON.stringify(this.products));
             }
 
             initEventListeners() {
@@ -781,21 +838,33 @@ const app = initializeApp(firebaseConfig);
                 });
             }
 
-            // Escuchar cambios en tiempo real
             listenToChanges() {
-                const q = query(collection(this.db, this.collectionName), orderBy('name'));
-                
-                onSnapshot(q, (snapshot) => {
-                    this.products = [];
-                    snapshot.forEach((doc) => {
-                        this.products.push({
-                            firebaseId: doc.id,
-                            ...doc.data()
+                try {
+                    const q = query(collection(this.db, this.collectionName), orderBy('name'));
+                    
+                    onSnapshot(q, (snapshot) => {
+                        console.log('📥 Recibiendo datos de Firebase...');
+                        this.products = [];
+                        snapshot.forEach((doc) => {
+                            this.products.push({
+                                firebaseId: doc.id,
+                                ...doc.data()
+                            });
                         });
+                        this.renderTable();
+                        this.updateStats();
+                    }, (error) => {
+                        console.error('❌ Error en Firebase:', error);
+                        this.showNotification('Error de conexión con Firebase', true);
+                        // Cambiar a localStorage
+                        this.usingFirebase = false;
+                        this.loadFromLocalStorage();
                     });
-                    this.renderTable();
-                    this.updateStats();
-                });
+                } catch (error) {
+                    console.error('❌ Error al escuchar cambios:', error);
+                    this.usingFirebase = false;
+                    this.loadFromLocalStorage();
+                }
             }
 
             async handleSubmit() {
@@ -807,29 +876,55 @@ const app = initializeApp(firebaseConfig);
                     timestamp: Date.now()
                 };
 
+                if (this.usingFirebase) {
+                    await this.handleFirebaseSubmit(product);
+                } else {
+                    this.handleLocalSubmit(product);
+                }
+
+                document.getElementById('productForm').reset();
+            }
+
+            async handleFirebaseSubmit(product) {
                 try {
                     if (this.editingId) {
-                        // Actualizar producto existente
                         const productRef = doc(this.db, this.collectionName, this.editingId);
                         await updateDoc(productRef, product);
                         this.showNotification('✅ Producto actualizado correctamente');
                         this.cancelEdit();
                     } else {
-                        // Agregar nuevo producto
                         await addDoc(collection(this.db, this.collectionName), product);
                         this.showNotification('✅ Producto agregado correctamente');
                     }
-                    document.getElementById('productForm').reset();
                 } catch (error) {
-                    console.error("Error:", error);
-                    this.showNotification('❌ Error al guardar el producto');
+                    console.error("Error Firebase:", error);
+                    this.showNotification('❌ Error al guardar en Firebase', true);
                 }
             }
 
-            editProduct(firebaseId) {
-                const product = this.products.find(p => p.firebaseId === firebaseId);
+            handleLocalSubmit(product) {
+                if (this.editingId) {
+                    const index = this.products.findIndex(p => p.id === this.editingId);
+                    this.products[index] = { ...product, id: this.editingId };
+                    this.showNotification('✅ Producto actualizado correctamente');
+                    this.cancelEdit();
+                } else {
+                    product.id = Date.now();
+                    this.products.push(product);
+                    this.showNotification('✅ Producto agregado correctamente');
+                }
+                this.saveToLocalStorage();
+                this.renderTable();
+                this.updateStats();
+            }
+
+            editProduct(id) {
+                const product = this.usingFirebase 
+                    ? this.products.find(p => p.firebaseId === id)
+                    : this.products.find(p => p.id === id);
+                
                 if (product) {
-                    this.editingId = firebaseId;
+                    this.editingId = this.usingFirebase ? id : product.id;
                     document.getElementById('productName').value = product.name;
                     document.getElementById('category').value = product.category;
                     document.getElementById('quantity').value = product.quantity;
@@ -853,14 +948,22 @@ const app = initializeApp(firebaseConfig);
                 document.getElementById('productForm').reset();
             }
 
-            async deleteProduct(firebaseId) {
+            async deleteProduct(id) {
                 if (confirm('¿Estás seguro de eliminar este producto?')) {
-                    try {
-                        await deleteDoc(doc(this.db, this.collectionName, firebaseId));
+                    if (this.usingFirebase) {
+                        try {
+                            await deleteDoc(doc(this.db, this.collectionName, id));
+                            this.showNotification('✅ Producto eliminado correctamente');
+                        } catch (error) {
+                            console.error("Error:", error);
+                            this.showNotification('❌ Error al eliminar', true);
+                        }
+                    } else {
+                        this.products = this.products.filter(p => p.id !== id);
+                        this.saveToLocalStorage();
+                        this.renderTable();
+                        this.updateStats();
                         this.showNotification('✅ Producto eliminado correctamente');
-                    } catch (error) {
-                        console.error("Error:", error);
-                        this.showNotification('❌ Error al eliminar el producto');
                     }
                 }
             }
@@ -891,6 +994,7 @@ const app = initializeApp(firebaseConfig);
                 tbody.innerHTML = products.map((product, index) => {
                     const total = product.quantity * product.price;
                     const status = this.getStockStatus(product.quantity);
+                    const productId = this.usingFirebase ? product.firebaseId : product.id;
                     
                     return `
                         <tr>
@@ -903,10 +1007,10 @@ const app = initializeApp(firebaseConfig);
                             <td><span class="badge ${status.class}">${status.text}</span></td>
                             <td>
                                 <div class="actions">
-                                    <button class="btn btn-warning" onclick="inventory.editProduct('${product.firebaseId}')">
+                                    <button class="btn btn-warning" onclick="inventory.editProduct('${productId}')">
                                         ✏️ Editar
                                     </button>
-                                    <button class="btn btn-danger" onclick="inventory.deleteProduct('${product.firebaseId}')">
+                                    <button class="btn btn-danger" onclick="inventory.deleteProduct('${productId}')">
                                         🗑️ Eliminar
                                     </button>
                                 </div>
@@ -934,9 +1038,11 @@ const app = initializeApp(firebaseConfig);
                 document.getElementById('lowStock').textContent = lowStock;
             }
 
-            showNotification(message) {
+            showNotification(message, isError = false) {
                 const notification = document.getElementById('notification');
                 notification.textContent = message;
+                notification.className = 'notification';
+                if (isError) notification.classList.add('error');
                 notification.classList.add('show');
                 setTimeout(() => notification.classList.remove('show'), 3000);
             }
@@ -954,15 +1060,28 @@ const app = initializeApp(firebaseConfig);
             
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
+            const loginButton = document.getElementById('loginButton');
             
-            if (auth.login(username, password)) {
-                document.getElementById('errorMessage').classList.remove('show');
-                document.getElementById('loginForm').reset();
-            } else {
-                document.getElementById('errorMessage').classList.add('show');
-                document.getElementById('password').value = '';
-                document.getElementById('password').focus();
-            }
+            console.log('Formulario de login enviado');
+            
+            // Deshabilitar botón mientras se procesa
+            loginButton.disabled = true;
+            loginButton.textContent = '⏳ Ingresando...';
+            
+            setTimeout(() => {
+                if (auth.login(username, password)) {
+                    document.getElementById('errorMessage').classList.remove('show');
+                    document.getElementById('loginForm').reset();
+                } else {
+                    document.getElementById('errorMessage').classList.add('show');
+                    document.getElementById('password').value = '';
+                    document.getElementById('password').focus();
+                }
+                
+                // Rehabilitar botón
+                loginButton.disabled = false;
+                loginButton.textContent = '🚀 Iniciar Sesión';
+            }, 300);
         });
 
         // Función global para cerrar sesión
@@ -971,6 +1090,14 @@ const app = initializeApp(firebaseConfig);
                 auth.logout();
             }
         };
+
+        // Prevenir navegación hacia atrás después del login
+        if (sessionStorage.getItem('isLoggedIn') === 'true') {
+            window.history.pushState(null, "", window.location.href);
+            window.onpopstate = function() {
+                window.history.pushState(null, "", window.location.href);
+            };
+        }
     </script>
 </body>
 </html>
